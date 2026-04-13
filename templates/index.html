@@ -54,16 +54,16 @@
 
         .hidden-section { display: none; padding: 20px; flex: 1; overflow-y: auto; margin-bottom: 70px; }
         .active-section { display: block; }
-        #camera-feed { width: 100%; border-radius: 12px; margin-top: 10px; }
+        
+        /* Mobile Camera Video element */
+        #camera-feed { width: 100%; border-radius: 12px; margin-top: 10px; background-color: #000; object-fit: cover; }
         
         .setting-group { margin-bottom: 20px; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 12px;}
         .setting-group label { display: block; margin-bottom: 8px; font-weight: bold;}
         input[type=range] { width: 100%; accent-color: var(--nav-color); }
         
-        /* Iframe map styling */
         #google-map-iframe { width: 100%; height: 400px; border-radius: 12px; margin-top: 10px; border: none; background-color: #222;}
 
-        /* New inputs for Saved Places */
         .custom-input { width: 100%; box-sizing: border-box; border-radius: 8px; padding: 12px; background: rgba(255,255,255,0.08); color: white; border: 1px solid rgba(255,255,255,0.2); margin-top: 5px; font-family: inherit;}
         .save-btn { width: 100%; padding: 15px; border-radius: 8px; background: var(--saved-color); color: white; border: none; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; transition: 0.2s;}
         .save-btn:active { transform: scale(0.98); }
@@ -102,7 +102,7 @@
                 <div class="card-icon"><i class="fas fa-microphone"></i></div>
                 <div class="card-text">
                     <h2>My Assistant</h2>
-                    <h3>Talk to Aura Sense</h3>
+                    <h3 id="assistant-status">Talk to Aura Sense</h3>
                     <p>Voice Commands</p>
                 </div>
             </div>
@@ -124,7 +124,8 @@
     <div id="scan-section" class="hidden-section">
         <h2>Live Scan Active</h2>
         <p>Analyzing surroundings...</p>
-        <img id="camera-feed" src="/video_feed" alt="Camera Feed">
+        <video id="camera-feed" autoplay playsinline muted></video>
+        <canvas id="photo-canvas" style="display:none;"></canvas>
     </div>
 
     <div id="map-section" class="hidden-section">
@@ -135,18 +136,16 @@
 
     <div id="saved-section" class="hidden-section">
         <h2>Emergency Details</h2>
-        <p style="font-size: 13px; color: var(--text-sub);">These details are saved securely on your device for emergencies.</p>
+        <p style="font-size: 13px; color: var(--text-sub);">Saved securely on your device.</p>
         
         <div class="setting-group">
             <label>Home Address</label>
             <textarea id="home-address-input" class="custom-input" rows="3" placeholder="Enter full home address here..."></textarea>
         </div>
-        
         <div class="setting-group">
-            <label>Favorite / Emergency Contact</label>
+            <label>Emergency Contact</label>
             <input type="text" id="emergency-contact-input" class="custom-input" placeholder="e.g. Mom: 9876543210">
         </div>
-        
         <button class="save-btn" onclick="saveEmergencyDetails()"><i class="fas fa-save"></i> Save Details</button>
     </div>
 
@@ -160,10 +159,6 @@
             <label>Model Sensitivity (<span id="sens-val">0.5</span>)</label>
             <input type="range" id="sensitivity" min="0.1" max="0.9" step="0.1" value="0.5" onchange="updateProcessingSettings()">
         </div>
-        <div class="setting-group">
-            <label>Processing Frames (Every <span id="frame-val">10</span>)</label>
-            <input type="range" id="frames" min="1" max="30" step="1" value="10" onchange="updateProcessingSettings()">
-        </div>
     </div>
 
     <div class="bottom-nav">
@@ -175,6 +170,16 @@
 </div>
 
 <script>
+    // HTTPS Check
+    if (window.location.hostname !== "localhost" && window.location.protocol !== "https:") {
+        window.location.protocol = "https:";
+    }
+
+    let cameraStream = null;
+    const videoFeed = document.getElementById('camera-feed');
+    const photoCanvas = document.getElementById('photo-canvas');
+    const ctx = photoCanvas.getContext('2d');
+
     // --- UI NAVIGATION ---
     function switchTab(tabId) {
         document.querySelectorAll('.hidden-section, .active-section').forEach(el => {
@@ -185,107 +190,70 @@
 
         document.getElementById(tabId + '-section').classList.remove('hidden-section');
         document.getElementById(tabId + '-section').classList.add('active-section');
-        
         if(document.getElementById('nav-' + tabId)) document.getElementById('nav-' + tabId).classList.add('active');
-    }
 
-    // ==================================================
-    // NEW: EMERGENCY DETAILS LOGIC
-    // ==================================================
-    function saveEmergencyDetails() {
-        const address = document.getElementById('home-address-input').value;
-        const contact = document.getElementById('emergency-contact-input').value;
-        
-        localStorage.setItem('aura_home_address', address);
-        localStorage.setItem('aura_emergency_contact', contact);
-        
-        speak("Emergency details updated successfully.");
-    }
-
-    function loadEmergencyDetails() {
-        const address = localStorage.getItem('aura_home_address') || "";
-        const contact = localStorage.getItem('aura_emergency_contact') || "";
-        
-        document.getElementById('home-address-input').value = address;
-        document.getElementById('emergency-contact-input').value = contact;
-    }
-
-    // ==================================================
-    // 1. GOOGLE MAPS API
-    // ==================================================
-    const GOOGLE_MAPS_API_KEY = "AIzaSyBBH-vLt7djIWXFTngq2FoaC0RX-CAR_C8";
-
-    async function fetchAddressAndSpeak(lat, lng) {
-        try {
-            const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}`;
-            let res = await fetch(url);
-            let data = await res.json();
-
-            if (data.status === "OK" && data.results.length > 0) {
-                let exactAddress = data.results[0].formatted_address;
-                document.getElementById('location-text').innerText = exactAddress;
-                speak(`You are currently near ${exactAddress}`);
-            } else {
-                speak("I am tracking your coordinates on the map, but couldn't fetch the exact street name.");
-            }
-        } catch (error) {
-            console.error("Google Maps API Error:", error);
-            speak("Live location map loaded.");
-        }
-    }
-
-    function initMap(shouldSpeakAddress = false) {
-        switchTab('map');
-        const fallbackLat = 26.7606; 
-        const fallbackLng = 83.3731;
-
-        function updateGoogleMap(lat, lng) {
-            const mapIframe = document.getElementById('google-map-iframe');
-            const url = `https://www.google.com/maps/embed/v1/view?key=${GOOGLE_MAPS_API_KEY}&center=${lat},${lng}&zoom=17`;
-            mapIframe.src = url;
-            document.getElementById('location-text').innerText = "Live Location Acquired";
-            
-            if (shouldSpeakAddress) {
-                fetchAddressAndSpeak(lat, lng);
-            } else {
-                speak("Navigation map is open.");
-            }
-        }
-
-        if (navigator.geolocation) {
-            let gpsTimeout = setTimeout(() => { updateGoogleMap(fallbackLat, fallbackLng); }, 4000);
-            navigator.geolocation.getCurrentPosition(
-                (position) => {
-                    clearTimeout(gpsTimeout);
-                    updateGoogleMap(position.coords.latitude, position.coords.longitude);
-                }, 
-                (error) => {
-                    clearTimeout(gpsTimeout);
-                    updateGoogleMap(fallbackLat, fallbackLng);
-                }, 
-                { enableHighAccuracy: true, timeout: 3500 }
-            ); 
+        // Manage Camera Hardware
+        if (tabId === 'scan') {
+            startMobileCamera();
         } else {
-            updateGoogleMap(fallbackLat, fallbackLng);
+            stopMobileCamera();
         }
     }
 
-    // --- VISION & SCENE DESCRIPTION ---
+    // --- MOBILE CAMERA LOGIC ---
+    function startMobileCamera() {
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            // "environment" means Back Camera on mobile
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+            .then(function(stream) {
+                cameraStream = stream;
+                videoFeed.srcObject = stream;
+            })
+            .catch(function(error) {
+                console.log("Camera error:", error);
+                alert("Please allow Camera permission for Aura Sense to work.");
+            });
+        } else {
+            alert("Camera not supported on this browser.");
+        }
+    }
+
+    function stopMobileCamera() {
+        if (cameraStream) {
+            cameraStream.getTracks().forEach(track => track.stop());
+            cameraStream = null;
+        }
+    }
+
+    // --- VISION & SCENE DESCRIPTION (Send frame to Render) ---
     function describeScene(isAuto = false) {
         if (window.speechSynthesis.speaking) return; 
+        if (!cameraStream || videoFeed.videoWidth === 0) return;
 
-        fetch('/get_objects')
-            .then(response => response.json())
-            .then(data => {
-                const objects = data.objects;
-                if (objects.length === 0) {
-                    if (!isAuto) speak("I don't see any recognized objects in front of you.");
-                } else {
-                    let description = "Right now, I see " + objects.join(", and ");
-                    speak(description);
-                    document.getElementById('recent-alert').innerHTML = `<strong>Recent Alert:</strong> Detected ${objects.length} objects.`;
-                }
-            });
+        // Take a photo from the video feed
+        photoCanvas.width = videoFeed.videoWidth;
+        photoCanvas.height = videoFeed.videoHeight;
+        ctx.drawImage(videoFeed, 0, 0, photoCanvas.width, photoCanvas.height);
+        
+        // Convert to base64
+        const imageData = photoCanvas.toDataURL('image/jpeg', 0.5); // 0.5 quality to save data
+
+        fetch('/analyze_frame', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: imageData })
+        })
+        .then(response => response.json())
+        .then(data => {
+            const objects = data.objects;
+            if (objects.length === 0) {
+                if (!isAuto) speak("I don't see any recognized objects in front of you.");
+            } else {
+                let description = "Right now, I see " + objects.join(", and ");
+                speak(description);
+                document.getElementById('recent-alert').innerHTML = `<strong>Recent Alert:</strong> Detected ${objects.length} objects.`;
+            }
+        }).catch(e => console.log("Frame send error", e));
     }
 
     let speakIntervalId = null;
@@ -310,8 +278,10 @@
     let isSpeaking = false;
 
     function initVoiceAssistant() {
-        if (!('webkitSpeechRecognition' in window)) return;
-
+        if (!('webkitSpeechRecognition' in window)) {
+            alert("Voice Recognition only works on Chrome/Edge browsers.");
+            return;
+        }
         recognition = new webkitSpeechRecognition();
         recognition.lang = 'en-US';
         recognition.continuous = true; 
@@ -319,173 +289,128 @@
 
         recognition.onstart = function() {
             isListening = true;
-            document.querySelector('.card-voice h3').innerText = "Assistant Active (Listening...)";
+            document.getElementById('assistant-status').innerText = "Assistant Active (Listening...)";
         };
 
         recognition.onresult = function(event) {
             const current = event.resultIndex;
             const command = event.results[current][0].transcript.toLowerCase().trim();
-            console.log("Aura Heard:", command);
             processCommand(command);
         };
 
         recognition.onend = function() {
             isListening = false;
-            if (!isSpeaking) {
-                setTimeout(() => { try { recognition.start(); } catch(e) {} }, 200);
-            }
+            document.getElementById('assistant-status').innerText = "Talk to Aura Sense";
         };
     }
 
-    // --- UPGRADED SMART INTENTION ROUTER ---
+    function startVoiceAssistant() {
+        if (!recognition) initVoiceAssistant();
+        if (!isListening && !isSpeaking) {
+            try { 
+                recognition.start(); 
+                speak("I am listening.");
+            } catch(e) {}
+        }
+    }
+
     function processCommand(command) {
         let text = command.toLowerCase().trim();
-
         // Check Emergency Details FIRST
         if (/(emergency contact|favorite contact)/.test(text)) {
             let contact = localStorage.getItem('aura_emergency_contact');
-            if (contact && contact.trim() !== "") {
-                speak("Your emergency contact is " + contact);
-            } else {
-                speak("You have not saved an emergency contact yet. Please update it in saved places.");
-            }
+            speak(contact ? "Your emergency contact is " + contact : "Please update your emergency contact.");
             return;
         }
-
         if (/(my home address|home address|where is my home)/.test(text)) {
             let address = localStorage.getItem('aura_home_address');
-            if (address && address.trim() !== "") {
-                speak("Your saved home address is " + address);
-            } else {
-                speak("You have not saved a home address yet. Please update it in saved places.");
-            }
+            speak(address ? "Your saved home address is " + address : "Please update your home address.");
             return;
         }
-
         // Location Check
-        if (/(where am i|where i am|my location|current location|where are we)/.test(text)) {
+        if (/(where am i|my location|current location)/.test(text)) {
             speak("Checking your live location.");
             initMap(true); 
             return;
         }
-
         // Camera Scan
         if (/(scan|surrounding|around me|front of me|what do you see|camera)/.test(text)) {
             speak("Scanning surroundings.");
             switchTab('scan');
-            setTimeout(() => describeScene(false), 1500);
+            setTimeout(() => describeScene(false), 2000);
             return;
         }
-
         // Time & Date
-        if (/(time|what time)/.test(text)) {
-            speak("It is " + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-            return;
-        }
-        if (/(date|day is it|what day)/.test(text)) {
-            speak("Today is " + new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }));
-            return;
-        }
-
-        // Basic Controls
-        if (/(navigate|open map|show map)/.test(text)) {
-            initMap(false);
-            return;
-        }
-        if (/(home|main menu)/.test(text)) {
-            switchTab('home');
-            speak("Main menu.");
-            return;
-        }
-        if (/(setting|open setting|options)/.test(text)) {
-            switchTab('settings');
-            speak("Opening settings.");
-            return;
-        }
-        if (/(saved places|emergency details)/.test(text)) {
-            switchTab('saved');
-            speak("Opening emergency details.");
-            return;
-        }
-
-        // CATCH-ALL AI
-        let cleanPrompt = text.replace(/^(aura|hey|assistant|jarvis|please)\s+/g, "").trim();
+        if (/(time|what time)/.test(text)) { speak("It is " + new Date().toLocaleTimeString()); return; }
+        if (/(date|what day)/.test(text)) { speak("Today is " + new Date().toLocaleDateString()); return; }
         
-        if(cleanPrompt.length > 1) {
-             askGeneralKnowledge(cleanPrompt);
-        } else {
-             speak("I am listening. How can I help you?");
-        }
+        // Basic Controls
+        if (/(navigate|show map)/.test(text)) { initMap(false); return; }
+        if (/(home|main menu)/.test(text)) { switchTab('home'); speak("Main menu."); return; }
+
+        let cleanPrompt = text.replace(/^(aura|hey|assistant|jarvis|please)\s+/g, "").trim();
+        if(cleanPrompt.length > 1) { askGeneralKnowledge(cleanPrompt); } 
     }
 
-    // --- AI KNOWLEDGE CHAT ---
     function askGeneralKnowledge(prompt) {
         if (isListening) { try { recognition.stop(); } catch(e) {} }
-        document.querySelector('.card-voice h3').innerText = "Assistant Thinking...";
-        
+        document.getElementById('assistant-status').innerText = "Assistant Thinking...";
         fetch('/ask_assistant', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt: prompt })
         })
         .then(response => response.json())
-        .then(data => {
-            speak(data.response); 
-            document.querySelector('.card-voice h3').innerText = "Talk to Aura Sense";
-        })
-        .catch(error => {
-            speak("Sorry, I lost my connection to the backend.");
-            document.querySelector('.card-voice h3').innerText = "Talk to Aura Sense";
-        });
+        .then(data => { speak(data.response); })
+        .catch(error => { speak("Sorry, connection lost."); });
     }
 
     function speak(text) {
         isSpeaking = true;
-        if (isListening) { recognition.stop(); }
-
+        if (isListening) { try { recognition.stop(); } catch(e) {} }
         const synth = window.speechSynthesis;
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 1.05; 
-        
         utterance.onend = function() {
             isSpeaking = false;
-            setTimeout(() => { try { recognition.start(); } catch(e) {} }, 300);
+            setTimeout(() => { if(document.getElementById('nav-voice').classList.contains('active')) startVoiceAssistant(); }, 300);
         };
-
         synth.speak(utterance);
     }
 
-    function startVoiceAssistant() {
-        if (!recognition) {
-            initVoiceAssistant();
-            speak("Aura Sense is online and listening.");
-        } else if (!isListening) {
-             try { recognition.start(); } catch(e) {}
-             speak("I am listening.");
+    function saveEmergencyDetails() {
+        localStorage.setItem('aura_home_address', document.getElementById('home-address-input').value);
+        localStorage.setItem('aura_emergency_contact', document.getElementById('emergency-contact-input').value);
+        speak("Details saved.");
+    }
+    
+    function loadEmergencyDetails() {
+        document.getElementById('home-address-input').value = localStorage.getItem('aura_home_address') || "";
+        document.getElementById('emergency-contact-input').value = localStorage.getItem('aura_emergency_contact') || "";
+    }
+
+    function initMap(shouldSpeakAddress = false) {
+        switchTab('map');
+        const fallbackLat = 26.7606; const fallbackLng = 83.3731;
+        function updateGoogleMap(lat, lng) {
+            document.getElementById('google-map-iframe').src = `https://www.google.com/maps/embed/v1/view?key=$AIzaSyBBH-vLt7djIWXFTngq2FoaC0RX-CAR_C8&center=${lat},${lng}&zoom=17`;
+            if (shouldSpeakAddress) speak("Map location acquired.");
+        }
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                pos => updateGoogleMap(pos.coords.latitude, pos.coords.longitude), 
+                err => updateGoogleMap(fallbackLat, fallbackLng), 
+                { enableHighAccuracy: true, timeout: 3500 }
+            ); 
         }
     }
 
     function updateProcessingSettings() {
-        const sens = document.getElementById('sensitivity').value;
-        const frames = document.getElementById('frames').value;
-        document.getElementById('sens-val').innerText = sens;
-        document.getElementById('frame-val').innerText = frames;
-
-        fetch('/update_settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sensitivity: sens, frames: frames })
-        });
+        document.getElementById('sens-val').innerText = document.getElementById('sensitivity').value;
     }
 
     window.onload = function() {
-        loadEmergencyDetails(); // opening app load's old details
+        loadEmergencyDetails();
         initVoiceAssistant();
-        document.body.addEventListener('click', () => {
-            if(!isListening && !isSpeaking) {
-                try { recognition.start(); } catch(e) {}
-            }
-        }, { once: true });
     };
 </script>
 </body>

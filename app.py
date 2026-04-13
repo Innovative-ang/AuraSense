@@ -1,6 +1,8 @@
-from flask import Flask, render_template, Response, request, jsonify
+from flask import Flask, render_template, request, jsonify
 import os
 import cv2
+import base64
+import numpy as np
 from ultralytics import YOLO
 from groq import Groq
 from duckduckgo_search import DDGS  # for Live internet
@@ -10,9 +12,10 @@ app = Flask(__name__)
 # ==========================================
 # 1. SETUP GROQ AI (Fastest & Error-Free)
 # ==========================================
-# Groq API key 
+# GitHub block se bachne ke liye hum key 'os.environ' se le rahe hain
+# (Render automatically apni settings se isme key daal dega)
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-client = Groq(api_key=GROQ_API_KEY)
+client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 # ==========================================
 # 2. SETUP YOLO MODEL
@@ -25,29 +28,44 @@ except Exception as e:
 
 # --- GLOBAL VARIABLES ---
 sensitivity = 0.5
-process_frames = 10
 latest_detections = [] 
-camera = cv2.VideoCapture(0)
 
-# --- CAMERA & YOLO LOGIC ---
-def generate_frames():
+# --- FLASK ROUTES ---
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/get_objects')
+def get_objects():
     global latest_detections
-    frame_count = 0
-    
-    while True:
-        success, frame = camera.read()
-        if not success:
-            break
+    return jsonify({"objects": latest_detections})
+
+@app.route('/update_settings', methods=['POST'])
+def update_settings():
+    global sensitivity
+    data = request.json
+    sensitivity = float(data.get('sensitivity', 0.5))
+    return jsonify({"status": "success"})
+
+# --- NAYA MOBILE CAMERA ROUTE (Phone se photo receive karne ke liye) ---
+@app.route('/analyze_frame', methods=['POST'])
+def analyze_frame():
+    global sensitivity, latest_detections
+    try:
+        data = request.json
+        if 'image' not in data:
+            return jsonify({"objects": []})
+
+        # Phone se aayi hui base64 photo ko padhna
+        image_data = data['image'].split(',')[1] 
+        nparr = np.frombuffer(base64.b64decode(image_data), np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        current_objects = []
         
-        # flip to remove Mirror effect
-        frame = cv2.flip(frame, 1)
-        frame_count += 1
-            
-        if model_yolo and frame_count % process_frames == 0:
+        # YOLO Processing
+        if model_yolo:
             results = model_yolo(frame, conf=sensitivity)
-            frame = results[0].plot()
-            
-            current_objects = []
             frame_area = frame.shape[0] * frame.shape[1]
             
             for box in results[0].boxes:
@@ -58,43 +76,18 @@ def generate_frames():
                 box_area = (x2 - x1) * (y2 - y1)
                 ratio = box_area / frame_area
                 
-                if ratio > 0.35:
-                    distance = "very close to you"
-                elif ratio > 0.10:
-                    distance = "nearby"
-                else:
-                    distance = "a bit far away"
+                if ratio > 0.35: distance = "very close to you"
+                elif ratio > 0.10: distance = "nearby"
+                else: distance = "a bit far away"
                     
                 current_objects.append(f"{class_name} that is {distance}")
-            
-            latest_detections = list(set(current_objects))
 
-        ret, buffer = cv2.imencode('.jpg', frame)
-        frame_bytes = buffer.tobytes()
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-
-# --- FLASK ROUTES ---
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-@app.route('/video_feed')
-def video_feed():
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-@app.route('/get_objects')
-def get_objects():
-    global latest_detections
-    return jsonify({"objects": latest_detections})
-
-@app.route('/update_settings', methods=['POST'])
-def update_settings():
-    global sensitivity, process_frames
-    data = request.json
-    sensitivity = float(data.get('sensitivity', 0.5))
-    process_frames = int(data.get('frames', 10))
-    return jsonify({"status": "success"})
+        latest_detections = list(set(current_objects))
+        return jsonify({"objects": latest_detections})
+    
+    except Exception as e:
+        print(f"Error processing frame: {e}")
+        return jsonify({"objects": []})
 
 # --- AURA SENSE BRAIN (GROQ AI + LIVE INTERNET) ---
 @app.route('/ask_assistant', methods=['POST'])
@@ -109,27 +102,29 @@ def ask_assistant():
         live_context = ""
         try:
             print("[SYSTEM]: Fetching live internet data...")
-            # getting current news from DuckDuckGo 
             results = DDGS().text(prompt, max_results=2)
             if results:
                 search_text = " ".join([res['body'] for res in results])
                 live_context = f"\n\nHere is real-time internet data to help you answer accurately: {search_text}"
-        except Exception as e:
+        except Exception:
             print("[SYSTEM]: Internet search skipped.")
 
-        # 2. GROQ AI CALL (Fast Llama model with Internet Data)
+        # 2. GROQ AI CALL 
         system_instruction = (
             "You are Aura Sense, an AI assistant built to help a blind person navigate the world. "
             "Answer the user's query clearly, conversationally, and keep it very brief (1-2 sentences maximum)."
             + live_context
         )
 
+        if not client:
+            return jsonify({"response": "API Key is missing. Please check Render Environment Variables."})
+
         chat_completion = client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": prompt}
             ],
-            model="llama-3.1-8b-instant", # Groq's superfast model
+            model="llama-3.1-8b-instant",
             temperature=0.4,
         )
         
@@ -144,4 +139,6 @@ def ask_assistant():
         return jsonify({"response": "I'm sorry, I am having trouble connecting to my brain right now."})
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000, threaded=True)
+    # Render cloud ke hisaab se port setting
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
