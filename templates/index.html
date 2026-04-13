@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aura Sense - Assistant</title>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        :root {
+            --bg-color: #0b1116;
+            --card-bg: rgba(255, 255, 255, 0.05);
+            --scan-color: #fca311;
+            --nav-color: #3a86ff;
+            --voice-color: #38b000;
+            --saved-color: #8d99ae;
+            --text-main: #ffffff;
+            --text-sub: #a0aab2;
+        }
+
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background-color: var(--bg-color); color: var(--text-main); display: flex; justify-content: center; height: 100vh; overflow: hidden; }
+        .app-container { width: 100%; max-width: 400px; height: 100%; display: flex; flex-direction: column; position: relative; background: linear-gradient(180deg, #101820 0%, #05080a 100%); }
+
+        .header { display: flex; align-items: center; padding: 30px 20px 20px; }
+        .app-logo { width: 50px; height: 50px; border-radius: 12px; margin-right: 15px; object-fit: cover; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        .title h1 { margin: 0; font-size: 22px; }
+        .title p { margin: 2px 0 0; font-size: 14px; color: var(--text-sub); }
+
+        .menu-list { flex: 1; padding: 0 20px; overflow-y: auto; padding-bottom: 80px; display: flex; flex-direction: column; gap: 15px; }
+        .card { background-color: var(--card-bg); border-radius: 16px; padding: 20px; display: flex; align-items: center; cursor: pointer; transition: 0.2s; border: 2px solid transparent; }
+        .card:active { transform: scale(0.98); }
+        .card-icon { font-size: 30px; margin-right: 20px; width: 40px; text-align: center; }
+        .card-text h2 { margin: 0; font-size: 16px; text-transform: uppercase; letter-spacing: 1px;}
+        .card-text h3 { margin: 4px 0; font-size: 18px; }
+        .card-text p { margin: 0; font-size: 12px; color: var(--text-sub); }
+
+        .card-scan { border-color: rgba(252, 163, 17, 0.4); box-shadow: 0 0 15px rgba(252, 163, 17, 0.1); }
+        .card-scan .card-icon, .card-scan h2 { color: var(--scan-color); }
+        .card-nav { border-color: rgba(58, 134, 255, 0.4); box-shadow: 0 0 15px rgba(58, 134, 255, 0.1); }
+        .card-nav .card-icon, .card-nav h2 { color: var(--nav-color); }
+        .card-voice { border-color: rgba(56, 176, 0, 0.4); box-shadow: 0 0 15px rgba(56, 176, 0, 0.1); }
+        .card-voice .card-icon, .card-voice h2 { color: var(--voice-color); }
+        .card-saved { border-color: rgba(141, 153, 174, 0.4); box-shadow: 0 0 15px rgba(141, 153, 174, 0.1); }
+        .card-saved .card-icon, .card-saved h2 { color: var(--saved-color); }
+
+        .status-bar { padding: 10px 20px; font-size: 12px; color: var(--text-sub); border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 70px; }
+        .status-bar strong { color: white; }
+
+        .bottom-nav { position: absolute; bottom: 0; width: 100%; background-color: #0b1116; display: flex; justify-content: space-around; padding: 15px 0 25px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+        .nav-item { text-align: center; color: var(--text-sub); cursor: pointer; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 5px; }
+        .nav-item.active { color: var(--nav-color); }
+        .nav-item i { font-size: 20px; }
+
+        .hidden-section { display: none; padding: 20px; flex: 1; overflow-y: auto; margin-bottom: 70px; }
+        .active-section { display: block; }
+        #camera-feed { width: 100%; border-radius: 12px; margin-top: 10px; }
+        
+        .setting-group { margin-bottom: 20px; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 12px;}
+        .setting-group label { display: block; margin-bottom: 8px; font-weight: bold;}
+        input[type=range] { width: 100%; accent-color: var(--nav-color); }
+        
+        /* Iframe map styling */
+        #google-map-iframe { width: 100%; height: 400px; border-radius: 12px; margin-top: 10px; border: none; background-color: #222;}
+
+        /* New inputs for Saved Places */
+        .custom-input { width: 100%; box-sizing: border-box; border-radius: 8px; padding: 12px; background: rgba(255,255,255,0.08); color: white; border: 1px solid rgba(255,255,255,0.2); margin-top: 5px; font-family: inherit;}
+        .save-btn { width: 100%; padding: 15px; border-radius: 8px; background: var(--saved-color); color: white; border: none; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; transition: 0.2s;}
+        .save-btn:active { transform: scale(0.98); }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <div id="home-section" class="active-section">
+        <div class="header">
+            <img src="/static/logo.png" alt="Aura Sense Logo" class="app-logo" onerror="this.style.display='none'">
+            <div class="title">
+                <h1>Aura Sense</h1>
+                <p>Ready to assist.</p>
+            </div>
+        </div>
+
+        <div class="menu-list">
+            <div class="card card-scan" onclick="switchTab('scan')">
+                <div class="card-icon"><i class="fas fa-camera"></i></div>
+                <div class="card-text">
+                    <h2>Scan Environment</h2>
+                    <h3>Scan Surroundings</h3>
+                    <p>Object & Scene Recognition</p>
+                </div>
+            </div>
+            <div class="card card-nav" onclick="initMap(false)">
+                <div class="card-icon"><i class="fas fa-location-arrow"></i></div>
+                <div class="card-text">
+                    <h2>Navigate</h2>
+                    <h3>Explore & Directions</h3>
+                    <p>Live Navigation</p>
+                </div>
+            </div>
+            <div class="card card-voice" onclick="startVoiceAssistant()">
+                <div class="card-icon"><i class="fas fa-microphone"></i></div>
+                <div class="card-text">
+                    <h2>My Assistant</h2>
+                    <h3>Talk to Aura Sense</h3>
+                    <p>Voice Commands</p>
+                </div>
+            </div>
+            <div class="card card-saved" onclick="switchTab('saved')">
+                <div class="card-icon"><i class="fas fa-bookmark"></i></div>
+                <div class="card-text">
+                    <h2>Saved Places</h2>
+                    <h3>Emergency Details</h3>
+                    <p>Home & Contacts</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="status-bar">
+            <div id="recent-alert"><strong>Recent Alert:</strong> System Online</div>
+        </div>
+    </div>
+
+    <div id="scan-section" class="hidden-section">
+        <h2>Live Scan Active</h2>
+        <p>Analyzing surroundings...</p>
+        <img id="camera-feed" src="/video_feed" alt="Camera Feed">
+    </div>
+
+    <div id="map-section" class="hidden-section">
+        <h2>Navigation</h2>
+        <p id="location-text">Detecting your location...</p>
+        <iframe id="google-map-iframe" allowfullscreen loading="lazy"></iframe>
+    </div>
+
+    <div id="saved-section" class="hidden-section">
+        <h2>Emergency Details</h2>
+        <p style="font-size: 13px; color: var(--text-sub);">These details are saved securely on your device for emergencies.</p>
+        
+        <div class="setting-group">
+            <label>Home Address</label>
+            <textarea id="home-address-input" class="custom-input" rows="3" placeholder="Enter full home address here..."></textarea>
+        </div>
+        
+        <div class="setting-group">
+            <label>Favorite / Emergency Contact</label>
+            <input type="text" id="emergency-contact-input" class="custom-input" placeholder="e.g. Mom: 9876543210">
+        </div>
+        
+        <button class="save-btn" onclick="saveEmergencyDetails()"><i class="fas fa-save"></i> Save Details</button>
+    </div>
+
+    <div id="settings-section" class="hidden-section">
+        <h2>Settings</h2>
+        <div class="setting-group">
+            <label>Auto-Speak Delay (<span id="delay-val">7</span> seconds)</label>
+            <input type="range" id="speak-delay" min="0" max="20" step="1" value="7" onchange="updateSpeakDelay()">
+        </div>
+        <div class="setting-group">
+            <label>Model Sensitivity (<span id="sens-val">0.5</span>)</label>
+            <input type="range" id="sensitivity" min="0.1" max="0.9" step="0.1" value="0.5" onchange="updateProcessingSettings()">
+        </div>
+        <div class="setting-group">
+            <label>Processing Frames (Every <span id="frame-val">10</span>)</label>
+            <input type="range" id="frames" min="1" max="30" step="1" value="10" onchange="updateProcessingSettings()">
+        </div>
+    </div>
+
+    <div class="bottom-nav">
+        <div class="nav-item active" id="nav-home" onclick="switchTab('home')"><i class="fas fa-home"></i><span>Home</span></div>
+        <div class="nav-item" id="nav-scan" onclick="switchTab('scan')"><i class="fas fa-qrcode"></i><span>Scan</span></div>
+        <div class="nav-item" id="nav-voice" onclick="startVoiceAssistant()"><i class="fas fa-microphone"></i><span>Voice</span></div>
+        <div class="nav-item" id="nav-settings" onclick="switchTab('settings')"><i class="fas fa-cog"></i><span>Settings</span></div>
+    </div>
+</div>
+
+<script>
+    // --- UI NAVIGATION ---
+    function switchTab(tabId) {
+        document.querySelectorAll('.hidden-section, .active-section').forEach(el => {
+            el.classList.remove('active-section');
+            el.classList.add('hidden-section');
+        });
+        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+
+        document.getElementById(tabId + '-section').classList.remove('hidden-section');
+        document.getElementById(tabId + '-section').classList.add('active-section');
+        
+        if(document.getElementById('nav-' + tabId)) document.getElementById('nav-' + tabId).classList.add('active');
+    }
+
+    // ==================================================
+    // NEW: EMERGENCY DETAILS LOGIC
+    // ==================================================
+    function saveEmergencyDetails() {
+        const address = document.getElementById('home-address-input').value;
+        const contact = document.getElementById('emergency-contact-input').value;
+        
+        localStorage.setItem('aura_home_address', address);
+        localStorage.setItem('aura_emergency_contact', contact);
+        
+        speak("Emergency details updated successfully.");
+    }
+
+    function loadEmergencyDetails() {
+        const address = localStorage.getItem('aura_home_address') || "";
+        const contact = localStorage.getItem('aura_emergency_contact') || "";
+        
+        document.getElementById('home-address-input').value = address;
+        document.getElementById('emergency-contact-input').value = contact;
+    }
+
+    // ==================================================
+    // 1. GOOGLE MAPS API
+    // ==================================================
+    const GOOGLE_MAPS_API_KEY = "AIzaSyBBH-vLt7djIWXFTngq2FoaC0RX-CAR_C8";
+
+    async function fetchAddressAndSpeak(lat, lng) {
+        try {
+            const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}`;
+            let res = await fetch(url);
+            let data = await res.json();
+
+            if (data.status === "OK" && data.results.length > 0) {
+                let exactAddress = data.results[0].formatted_address;
+                document.getElementById('location-text').innerText = exactAddress;
+                speak(`You are currently near ${exactAddress}`);
+            } else {
+                speak("I am tracking your coordinates on the map, but couldn't fetch the exact street name.");
+            }
+        } catch (error) {
+            console.error("Google Maps API Error:", error);
+            speak("Live location map loaded.");
+        }
+    }
+
+    function initMap(shouldSpeakAddress = false) {
+        switchTab('map');
+        const fallbackLat = 26.7606; 
+        const fallbackLng = 83.3731;
+
+        function updateGoogleMap(lat, lng) {
+            const mapIframe = document.getElementById('google-map-iframe');
+            const url = `https://www.google.com/maps/embed/v1/view?key=${GOOGLE_MAPS_API_KEY}&center=${lat},${lng}&zoom=17`;
+            mapIframe.src = url;
+            document.getElementById('location-text').innerText = "Live Location Acquired";
+            
+            if (shouldSpeakAddress) {
+                fetchAddressAndSpeak(lat, lng);
+            } else {
+                speak("Navigation map is open.");
+            }
+        }
+
+        if (navigator.geolocation) {
+            let gpsTimeout = setTimeout(() => { updateGoogleMap(fallbackLat, fallbackLng); }, 4000);
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    clearTimeout(gpsTimeout);
+                    updateGoogleMap(position.coords.latitude, position.coords.longitude);
+                }, 
+                (error) => {
+                    clearTimeout(gpsTimeout);
+                    updateGoogleMap(fallbackLat, fallbackLng);
+                }, 
+                { enableHighAccuracy: true, timeout: 3500 }
+            ); 
+        } else {
+            updateGoogleMap(fallbackLat, fallbackLng);
+        }
+    }
+
+    // --- VISION & SCENE DESCRIPTION ---
+    function describeScene(isAuto = false) {
+        if (window.speechSynthesis.speaking) return; 
+
+        fetch('/get_objects')
+            .then(response => response.json())
+            .then(data => {
+                const objects = data.objects;
+                if (objects.length === 0) {
+                    if (!isAuto) speak("I don't see any recognized objects in front of you.");
+                } else {
+                    let description = "Right now, I see " + objects.join(", and ");
+                    speak(description);
+                    document.getElementById('recent-alert').innerHTML = `<strong>Recent Alert:</strong> Detected ${objects.length} objects.`;
+                }
+            });
+    }
+
+    let speakIntervalId = null;
+    function updateSpeakDelay() {
+        let delay = parseInt(document.getElementById('speak-delay').value);
+        document.getElementById('delay-val').innerText = delay;
+        if (speakIntervalId) clearInterval(speakIntervalId);
+        
+        if (delay > 0) {
+            speakIntervalId = setInterval(() => {
+                if (document.getElementById('scan-section').classList.contains('active-section')) {
+                    describeScene(true);
+                }
+            }, delay * 1000);
+        }
+    }
+    updateSpeakDelay();
+
+    // --- VOICE RECOGNITION ---
+    let recognition;
+    let isListening = false;
+    let isSpeaking = false;
+
+    function initVoiceAssistant() {
+        if (!('webkitSpeechRecognition' in window)) return;
+
+        recognition = new webkitSpeechRecognition();
+        recognition.lang = 'en-US';
+        recognition.continuous = true; 
+        recognition.interimResults = false;
+
+        recognition.onstart = function() {
+            isListening = true;
+            document.querySelector('.card-voice h3').innerText = "Assistant Active (Listening...)";
+        };
+
+        recognition.onresult = function(event) {
+            const current = event.resultIndex;
+            const command = event.results[current][0].transcript.toLowerCase().trim();
+            console.log("Aura Heard:", command);
+            processCommand(command);
+        };
+
+        recognition.onend = function() {
+            isListening = false;
+            if (!isSpeaking) {
+                setTimeout(() => { try { recognition.start(); } catch(e) {} }, 200);
+            }
+        };
+    }
+
+    // --- UPGRADED SMART INTENTION ROUTER ---
+    function processCommand(command) {
+        let text = command.toLowerCase().trim();
+
+        // Check Emergency Details FIRST
+        if (/(emergency contact|favorite contact)/.test(text)) {
+            let contact = localStorage.getItem('aura_emergency_contact');
+            if (contact && contact.trim() !== "") {
+                speak("Your emergency contact is " + contact);
+            } else {
+                speak("You have not saved an emergency contact yet. Please update it in saved places.");
+            }
+            return;
+        }
+
+        if (/(my home address|home address|where is my home)/.test(text)) {
+            let address = localStorage.getItem('aura_home_address');
+            if (address && address.trim() !== "") {
+                speak("Your saved home address is " + address);
+            } else {
+                speak("You have not saved a home address yet. Please update it in saved places.");
+            }
+            return;
+        }
+
+        // Location Check
+        if (/(where am i|where i am|my location|current location|where are we)/.test(text)) {
+            speak("Checking your live location.");
+            initMap(true); 
+            return;
+        }
+
+        // Camera Scan
+        if (/(scan|surrounding|around me|front of me|what do you see|camera)/.test(text)) {
+            speak("Scanning surroundings.");
+            switchTab('scan');
+            setTimeout(() => describeScene(false), 1500);
+            return;
+        }
+
+        // Time & Date
+        if (/(time|what time)/.test(text)) {
+            speak("It is " + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+            return;
+        }
+        if (/(date|day is it|what day)/.test(text)) {
+            speak("Today is " + new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }));
+            return;
+        }
+
+        // Basic Controls
+        if (/(navigate|open map|show map)/.test(text)) {
+            initMap(false);
+            return;
+        }
+        if (/(home|main menu)/.test(text)) {
+            switchTab('home');
+            speak("Main menu.");
+            return;
+        }
+        if (/(setting|open setting|options)/.test(text)) {
+            switchTab('settings');
+            speak("Opening settings.");
+            return;
+        }
+        if (/(saved places|emergency details)/.test(text)) {
+            switchTab('saved');
+            speak("Opening emergency details.");
+            return;
+        }
+
+        // CATCH-ALL AI
+        let cleanPrompt = text.replace(/^(aura|hey|assistant|jarvis|please)\s+/g, "").trim();
+        
+        if(cleanPrompt.length > 1) {
+             askGeneralKnowledge(cleanPrompt);
+        } else {
+             speak("I am listening. How can I help you?");
+        }
+    }
+
+    // --- AI KNOWLEDGE CHAT ---
+    function askGeneralKnowledge(prompt) {
+        if (isListening) { try { recognition.stop(); } catch(e) {} }
+        document.querySelector('.card-voice h3').innerText = "Assistant Thinking...";
+        
+        fetch('/ask_assistant', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: prompt })
+        })
+        .then(response => response.json())
+        .then(data => {
+            speak(data.response); 
+            document.querySelector('.card-voice h3').innerText = "Talk to Aura Sense";
+        })
+        .catch(error => {
+            speak("Sorry, I lost my connection to the backend.");
+            document.querySelector('.card-voice h3').innerText = "Talk to Aura Sense";
+        });
+    }
+
+    function speak(text) {
+        isSpeaking = true;
+        if (isListening) { recognition.stop(); }
+
+        const synth = window.speechSynthesis;
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.05; 
+        
+        utterance.onend = function() {
+            isSpeaking = false;
+            setTimeout(() => { try { recognition.start(); } catch(e) {} }, 300);
+        };
+
+        synth.speak(utterance);
+    }
+
+    function startVoiceAssistant() {
+        if (!recognition) {
+            initVoiceAssistant();
+            speak("Aura Sense is online and listening.");
+        } else if (!isListening) {
+             try { recognition.start(); } catch(e) {}
+             speak("I am listening.");
+        }
+    }
+
+    function updateProcessingSettings() {
+        const sens = document.getElementById('sensitivity').value;
+        const frames = document.getElementById('frames').value;
+        document.getElementById('sens-val').innerText = sens;
+        document.getElementById('frame-val').innerText = frames;
+
+        fetch('/update_settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sensitivity: sens, frames: frames })
+        });
+    }
+
+    window.onload = function() {
+        loadEmergencyDetails(); // opening app load's old details
+        initVoiceAssistant();
+        document.body.addEventListener('click', () => {
+            if(!isListening && !isSpeaking) {
+                try { recognition.start(); } catch(e) {}
+            }
+        }, { once: true });
+    };
+</script>
+</body>
+</html>
